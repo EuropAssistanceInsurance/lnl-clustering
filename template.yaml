@@ -1,0 +1,59 @@
+connectionDetails : 
+    github :
+        repo : 
+            ""
+        token : 
+            ""
+    db :
+        host : 
+            ''
+        port : 
+            ''
+        name : 
+            ''
+        username : 
+            ''
+        password : 
+            ''
+
+    fixxer :
+        api :
+            ""
+    database :
+        postGreSQL :
+            host :
+                ""
+            port :
+                ""
+            dbname :
+                ""
+            username :
+                ""
+            password :
+                ""
+        mySQL :
+            username :
+                ""
+            password :
+                ""
+        oracle :
+            claimsFiat :
+                username :
+                    ""
+                password :
+                    ""
+            claimsNonFiat :
+                username :
+                    ""
+                password :
+                    ""
+            sales :
+                username :
+                    ""
+                password :
+                    ""
+            connectionKey :
+                ""
+
+Otherstf :
+    "OtherStuff"
