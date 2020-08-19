@@ -74,7 +74,6 @@ splitIndex <- caret::createDataPartition(dat[, native_country],
 clusterDF <- dat[splitIndex,  ]
 modDF     <- dat[-splitIndex, ]
 
-
 # Clustering Scaling/Standardising of variables/ Mean and Standard deviation to create info 
 clustPrep <- clusterDF %>% 
   dplyr::group_by(native_country) %>% 
@@ -164,21 +163,21 @@ test  <- modDF2[-splitIndex, ] %>% as.tibble()
 testTarg <- test[[target]]
 test[[target]] <- NULL
 
-# Modeling data
-modOrigDat  <- train[, c(featOrig)]
-modClustDat <- train[, c(featClust)]
+# Modeling train data
+trainOrig  <- train[, c(featOrig)]
+trainClust <- train[, c(featClust)]
 
 # Dummify variables for train set
-modOrigDatDummy <- modOrigDat %>% dummyVars(formula = "~.", fullRank = F)
-modOrigDat      <- predict(modOrigDatDummy, modOrigDat) %>% as.data.frame()
-modOrigDat[[target]] <- trainTarg
+trainOrigDummy <- trainOrig %>% dummyVars(formula = "~.", fullRank = F)
+trainOrig      <- predict(trainOrigDummy, trainOrig) %>% as.data.frame()
+trainOrig[[target]] <- trainTarg
   
-modClustDatDummy <- modClustDat %>% dummyVars(formula = "~.", fullRank = F)
-modClustDat      <- predict(modClustDatDummy, modClustDat) %>% as.data.frame()
-modClustDat[[target]] <- trainTarg
+trainClustDummy <- trainClust %>% dummyVars(formula = "~.", fullRank = F)
+trainClust      <- predict(trainClustDummy, trainClust) %>% as.data.frame()
+trainClust[[target]] <- trainTarg
 
-# build model using countries
 
+# Build model using countries ---------------------------------------------
 # Setting Parameters
 objControl <- trainControl(method = 'cv', 
                            number = 3,
@@ -191,12 +190,12 @@ gbmGrid <- data.frame(interaction.depth = runif(10, 0 ,   5)    %>% round(0),
                       shrinkage         = runif(10, 0.01, 0.2)  %>% round(4)) %>%
   distinct()
 
-# Training the model
-formFeats  <- names(modOrigDat)[names(modOrigDat) != target]
+# Training the train model
+formFeats  <- names(trainOrig)[names(trainOrig) != target]
 modFormula <- formula(paste0(target, " ~ ", paste0(formFeats, collapse = " + ")))
 set.seed(123)
-objModel <- caret::train(modFormula,
-                  data         = modOrigDat,
+trainOrigObjModel <- caret::train(modFormula,
+                  data         = trainOrig,
                   distribution = "bernoulli",
                   method       = "gbm",
                   metric       = "ROC",
@@ -204,10 +203,35 @@ objModel <- caret::train(modFormula,
                   tuneGrid     = gbmGrid)
 
 # Look at which  variables are important
-summary(objModel)
+summary(trainOrigObjModel)
+
+# Get predictions on your testing data
+trainOrig$pred <- predict(object = trainObjModel, trainOrig)
+
+
+# Build model using clusters ----------------------------------------------
+
+# Modeling test data
+# Training the train model
+formFeats  <- names(trainClust)[names(trainClust) != target]
+modFormula <- formula(paste0(target, " ~ ", paste0(formFeats, collapse = " + ")))
+set.seed(123)
+trainClustObjModel <- caret::train(modFormula,
+                              data         = trainClust,
+                              distribution = "bernoulli",
+                              method       = "gbm",
+                              metric       = "ROC",
+                              trControl    = objControl,
+                              tuneGrid     = gbmGrid)
+
+# Look at which  variables are important
+summary(trainClustObjModel)
+
+# Get predictions on your testing data
+trainClust$pred <- predict(object = trainClustObjModel, trainClust)
 
 # Evaluating
-predictions <- predict(object = objModel, test, type='raw')
+predictions <- predict(object = trainClustObjModel, test, type='raw')
 
 head(predictions)
 
