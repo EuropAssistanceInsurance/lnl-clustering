@@ -135,6 +135,84 @@ rownames(clustAnalysis) <- NULL
 # Analysis
 clustAnalysis %>% group_by(clusters) %>% summarise_all(.funs = mean)
 
+# Join clusters onto Modeling Data
+modDF2 <- modDF %>% 
+  left_join(finClust, by = c("native_country" = "native_country")) %>% 
+  mutate(income = ifelse(income == ">50K", "high", "low") %>% as.factor())
+
+# Model building ----------------------------------------------------------
+# Key variables
+target <- "income"
+featOrig  <- c("age", "workclass", "fnlwgt", "education", "education_num", "marital_status", 
+               "occupation", "relationship", "race", "sex", "capital_gain", "capital_loss",
+               "hours_per_week", "native_country")
+featClust <- c("age", "workclass", "fnlwgt", "education", "education_num", "marital_status", 
+               "occupation", "relationship", "race", "sex", "capital_gain", "capital_loss",
+               "hours_per_week", "cluster")
+
+# Split data into train and test 
+set.seed(123)
+splitIndex <- caret::createDataPartition(modDF2[, income],
+                                         p     = 0.8,
+                                         list  = FALSE,
+                                         times = 1)
+train <- modDF2[splitIndex,  ] %>% as.tibble()
+trainTarg <- train[[target]]
+train[[target]] <- NULL
+
+test  <- modDF2[-splitIndex, ] %>% as.tibble()
+testTarg <- test[[target]]
+test[[target]] <- NULL
+
+# Modeling data
+modOrigDat  <- train[, c(featOrig)]
+modClustDat <- train[, c(featClust)]
+
+# Dummify variables for train set
+modOrigDatDummy <- modOrigDat %>% dummyVars(formula = "~.", fullRank = F)
+modOrigDat      <- predict(modOrigDatDummy, modOrigDat) %>% as.data.frame()
+modOrigDat[[target]] <- trainTarg
+  
+modClustDatDummy <- modClustDat %>% dummyVars(formula = "~.", fullRank = F)
+modClustDat      <- predict(modClustDatDummy, modClustDat) %>% as.data.frame()
+modClustDat[[target]] <- trainTarg
+
+# build model using countries
+
+# Setting Parameters
+objControl <- trainControl(method = 'cv', 
+                           number = 3,
+                           summaryFunction = twoClassSummary, 
+                           classProbs = TRUE)
+set.seed(123)
+gbmGrid <- data.frame(interaction.depth = runif(10, 0 ,   5)    %>% round(0),
+                      n.trees           = runif(10, 50,   1000) %>% round(0),
+                      n.minobsinnode    = runif(10, 1,    100)  %>% round(0),
+                      shrinkage         = runif(10, 0.01, 0.2)  %>% round(4)) %>%
+  distinct()
+
+# Training the model
+formFeats  <- names(modOrigDat)[names(modOrigDat) != target]
+modFormula <- formula(paste0(target, " ~ ", paste0(formFeats, collapse = " + ")))
+set.seed(123)
+objModel <- caret::train(modFormula,
+                  data         = modOrigDat,
+                  distribution = "bernoulli",
+                  method       = "gbm",
+                  metric       = "ROC",
+                  trControl    = objControl,
+                  tuneGrid     = gbmGrid)
+
+# Look at which  variables are important
+summary(objModel)
+
+# Evaluating
+predictions <- predict(object = objModel, test, type='raw')
+
+head(predictions)
+
+# build model using clusters
+
 
 
 
