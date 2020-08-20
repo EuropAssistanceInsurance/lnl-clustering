@@ -117,21 +117,20 @@ factoextra::fviz_nbclust(clustPrep, kmeans, method = "wss") +
 # One should choose a number of clusters so that adding another cluster doesn’t 
 # improve much better the total WSS.
 
-# Build clusters
+# Build clusters with selected k
 clusters <- stats::kmeans(clustPrep, centers = 8)
 
 # Look at the output of kmeans
 str(clusters)
 
-# Extract clusters and join back to clusterDF
+# Extract clusters and join back to finClust which holds country data
 finClust$cluster <- clusters$cluster
 
 # Join back original variables for analysis
 clustAnalysis <- clustPrep
 clustAnalysis$clusters <- clusters$cluster
 rownames(clustAnalysis) <- NULL
-
-# Analysis
+# Summary analysis
 clustAnalysis %>% group_by(clusters) %>% summarise_all(.funs = mean)
 
 # Join clusters onto Modeling Data
@@ -149,7 +148,7 @@ featClust <- c("age", "workclass", "fnlwgt", "education", "education_num", "mari
                "occupation", "relationship", "race", "sex", "capital_gain", "capital_loss",
                "hours_per_week", "cluster")
 
-# Split data into train and test 
+# Split data into 80 train and 20 test 
 set.seed(123)
 splitIndex <- caret::createDataPartition(modDF2[, income],
                                          p     = 0.8,
@@ -163,7 +162,7 @@ test  <- modDF2[-splitIndex, ] %>% as.tibble()
 testTarg <- test[[target]]
 test[[target]] <- NULL
 
-# Modeling train data
+# Modeling data for train
 trainOrig  <- train[, c(featOrig)]
 trainClust <- train[, c(featClust)]
 
@@ -176,9 +175,28 @@ trainClustDummy <- trainClust %>% dummyVars(formula = "~.", fullRank = F)
 trainClust      <- predict(trainClustDummy, trainClust) %>% as.data.frame()
 trainClust[[target]] <- trainTarg
 
+# Prepare test data
+testOrig  <- test[, c(featOrig)]
+testClust <- test[, c(featClust)]
 
-# Build model using countries ---------------------------------------------
-# Setting Parameters
+# Dummify variables for test set
+testOrigDummy                 <- testOrig %>% dummyVars(formula = "~.", fullRank = F)
+testOrig                      <- predict(testOrigDummy, testOrig) %>% as.data.frame()
+testOrig[[target]]            <- testTarg
+testOrig$workclasswithout_pay <- 0
+testOrig$workclassfederal_gov <- 0
+testOrig$workclasslocal_gov   <- 0
+
+
+
+testClustDummy                  <- testClust %>% dummyVars(formula = "~.", fullRank = F)
+testClust                       <- predict(testClustDummy, testClust) %>% as.data.frame()
+testClust[[target]]             <- testTarg
+testClust$workclasswithout_pay  <- 0
+testClust$workclassfederal_gov  <- 0
+testClust$workclasslocal_gov    <- 0
+
+# Setting Parameters ------------------------------------------------------
 objControl <- trainControl(method = 'cv', 
                            number = 3,
                            summaryFunction = twoClassSummary, 
@@ -190,6 +208,8 @@ gbmGrid <- data.frame(interaction.depth = runif(10, 0 ,   5)    %>% round(0),
                       shrinkage         = runif(10, 0.01, 0.2)  %>% round(4)) %>%
   distinct()
 
+
+# Build model using countries ---------------------------------------------
 # Training the train model
 formFeats  <- names(trainOrig)[names(trainOrig) != target]
 modFormula <- formula(paste0(target, " ~ ", paste0(formFeats, collapse = " + ")))
@@ -205,14 +225,17 @@ trainOrigObjModel <- caret::train(modFormula,
 # Look at which  variables are important
 summary(trainOrigObjModel)
 
+# Which tuning parameters were most important
+print(trainOrigObjModel)
+
+# Evaluate GBM
 # Get predictions on your testing data
-trainOrig$pred <- predict(object = trainObjModel, trainOrig)
+origPred <- predict(object = trainOrigObjModel, testOrig)
 
 
 # Build model using clusters ----------------------------------------------
 
-# Modeling test data
-# Training the train model
+# Training the model with Clusters
 formFeats  <- names(trainClust)[names(trainClust) != target]
 modFormula <- formula(paste0(target, " ~ ", paste0(formFeats, collapse = " + ")))
 set.seed(123)
@@ -228,10 +251,11 @@ trainClustObjModel <- caret::train(modFormula,
 summary(trainClustObjModel)
 
 # Get predictions on your testing data
-trainClust$pred <- predict(object = trainClustObjModel, trainClust)
+trainClust$pred <- predict(object = trainClustObjModel, testClust)
 
 # Evaluating
-predictions <- predict(object = trainClustObjModel, test, type='raw')
+predictions <- predict(object = trainClustObjModel, testClust, type='raw')
+auc <- roc(ifelse(testDF[,outcomeName]=="yes",1,0), predictions[[2]])
 
 head(predictions)
 
