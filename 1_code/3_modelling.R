@@ -90,12 +90,6 @@ summary(trainOrigObjModel)
 # Which tuning parameters were most important
 print(trainOrigObjModel)
 
-
-
-
-
-
-
 # Adding missing dummy variables to test set ------------------------------
 # Original countries
 # Coefficient names used in the model
@@ -112,37 +106,6 @@ nameDiff <- dplyr::anti_join(coefNames, testOrigNames)
 for (nm in nameDiff$names) {
   testOrig[[nm]] <- 0
 }
-
-# Clustered countries
-# Coefficient names used in the model
-coefNames <- data.frame(names = trainClustObjModel$coefnames) %>% 
-  mutate(n = 1)
-
-testClustNames <- data.frame(names = names(testClust)) %>% 
-  mutate(n = 1)
-
-# Check difference in Model Coefficient names and test dataset
-nameDiff <- dplyr::anti_join(coefNames, testClustNames)
-
-# Add variables that are missing from test
-for (nm in nameDiff$names) {
-  testClust[[nm]] <- 0
-}
-
-
-# Model evaluation --------------------------------------------------------
-# Get predictions and probabilities on your test data
-origPred <- predict(object = trainOrigObjModel, testOrig, type = 'raw')
-origPred <- predict(object = trainOrigObjModel, testOrig, type = 'prob')
-
-head(origPred)
-
-# Overall Accuracy
-print(caret::postResample(pred = origPred, obs = as.factor(testOrig[,"income"])))
-
-auc <- pROC::roc(ifelse(testOrig[,"income"] == "high", 1, 0), origPred[[1]])
-
-print(auc$auc)
 
 
 # Build model using clusters ----------------------------------------------
@@ -162,43 +125,60 @@ trainClustObjModel <- caret::train(modFormula,
 # Look at which  variables are important
 summary(trainClustObjModel)
 
-# Get predictions on your testing data
-trainClust$pred <- predict(object = trainClustObjModel, testClust)
+# Adding missing dummy variables to test set ------------------------------
+# Clustered countries
+# Coefficient names used in the model
+coefNames <- data.frame(names = trainClustObjModel$coefnames) %>% 
+  mutate(n = 1)
 
-# Evaluating
-predictions <- predict(object = trainClustObjModel, testClust, type='raw')
-auc <- roc(ifelse(testDF[,outcomeName]=="yes",1,0), predictions[[2]])
+testClustNames <- data.frame(names = names(testClust)) %>% 
+  mutate(n = 1)
 
-head(predictions)
+# Check difference in Model Coefficient names and test dataset
+nameDiff <- dplyr::anti_join(coefNames, testClustNames)
 
-# Model evaluation on Clustered
+# Add variables that are missing from test
+for (nm in nameDiff$names) {
+  testClust[[nm]] <- 0
+}
+
+  
+
+# Model evaluation --------------------------------------------------------
+# Original with Countries
+# Get predictions and probabilities on your test data
+origPredRaw <- predict(object = trainOrigObjModel, testOrig, type = 'raw')
+origPredProb <- predict(object = trainOrigObjModel, testOrig, type = 'prob')
+
+head(origPredRaw)
+head(origPredProb)
+
+# Overall Accuracy
+print(caret::postResample(pred = origPredRaw, obs = as.factor(testOrig[,"income"])))
+
+aucOrig <- pROC::roc(ifelse(testOrig[,"income"] == "high", 1, 0), origPredProb[[1]])
+
+print(aucOrig$auc)
+
+# Original with Countries
+# Get predictions and probabilities on your test data
+clustPredRaw <- predict(object = trainClustObjModel, testClust, type = 'raw')
+clustPredProb <- predict(object = trainClustObjModel, testClust, type = 'prob')
+
+head(clustPredRaw)
+head(clustPredProb)
+
+# Overall Accuracy
+print(caret::postResample(pred = clustPredRaw, obs = as.factor(testClust[,"income"])))
+
+aucClust <- pROC::roc(ifelse(testClust[,"income"] == "high", 1, 0), clustPredProb[[1]])
+
+print(aucClust$auc)
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# Other
 factoextra::fviz_nbclust(clusters, hcut, method = "gap_stat") +
   geom_vline(xintercept = 3, linetype = 2)
-
-
-
-
-
-
-
-
-
 
