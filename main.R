@@ -9,4 +9,4 @@ for (func in list.files(path = "1_code/0_functions/", full.names = TRUE)) source
 metaData <- yaml::read_yaml(file = "metadata.yaml")
 
 devtools::install_github(repo = metaData$connectionDetails$github$repo, auth_token = metaData$connectionDetails$github$token)
-eaR::pkgInstaller(libs = c("tidyverse", "lubridate", "caret", "factoextra"), destinationFolder = "C:/Users/a009831/Documents/rlibraries")
+eaR::pkgInstaller(libs = c("tidyverse", "lubridate", "caret", "factoextra", "e1071"), destinationFolder = "C:/Users/a009831/Documents/rlibraries")
