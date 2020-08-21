@@ -1,0 +1,430 @@
+---
+date: "`r Sys.Date()`"
+title: "Clustering and Modelling Lunch and Learn"
+author: "Chantelle Yau"
+output:
+  rmdformats::material:
+    code_folding: hide
+    self_contained: true
+    thumbnails: false
+    lightbox: false
+---
+
+```{r knitr_init, echo = FALSE, results = "asis", cache = FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print = "75")
+opts_chunk$set(echo    = TRUE,
+               cache   = FALSE,
+               prompt  = FALSE,
+               tidy    = FALSE,
+               comment = NA,
+               message = FALSE,
+               warning = FALSE)
+opts_knit$set(width = 75)
+```
+
+# Introduction
+
+What is Clustering?
+
+Clustering is a unsupervised learning method and technique that involves grouping of data points. 
+
+Ways to Cluster:
+
+1. K-Means Clustering
+2. Hierarchical Clustering
+3. Mean-Shift Clustering
+4. Density Based Spatial Clustering of Applications with Noise (DBSCAN)
+5. Expectation-Maximization (EM) Clustering using Guassian Mixture Models (GMM)
+
+For this tutorial, we will consider a public dataset for Income Census Data.
+
+1. Clustering
+2. Modeling
+
+1. The aim of this is to Cluster a column with 41 modalities into something more reasonable/simple.
+This is to reduce number of variables that go into our model because each country can be considered as a separate variable.
+It can make the model more interpretable if the clusters make sense, i.e. in the case where we have car makes, models, engine size etc. it can make sense to have high end sports cars grouped together (Audi, BMW's S model), or cheap low engine size first buyer cars (Peugeot, Citroen, Kia etc.).
+
+2. Build a model on the unclustered data and on the clustered data, and compare models.
+
+# Setup Code and Load Data
+
+```{r}
+# Setup and Load Packages -------------------------------------------------
+options(scipen = 999)
+if (!is.element("yaml",     .packages(all.available = TRUE))) install.packages("yaml")
+if (!is.element("devtools", .packages(all.available = TRUE))) install.packages("devtools")
+
+for (func in list.files(path = "1_code/0_functions/", full.names = TRUE)) source(func)
+
+# Load Meta data
+metaData <- yaml::read_yaml(file = "metadata.yaml")
+
+devtools::install_github(repo = metaData$connectionDetails$github$repo, auth_token = metaData$connectionDetails$github$token)
+eaR::pkgInstaller(libs = c("tidyverse", "lubridate", "caret", "factoextra", "e1071"), destinationFolder = "C:/Users/a009831/Documents/rlibraries")
+
+# Load train and test data ------------------------------------------------
+train <- data.table::fread("0_data/Census Income/adult.data.csv") %>%
+  eaR::cleanNames(sep = "_")
+
+test <- data.table::fread("0_data/Census Income/adult.test.csv") %>% 
+  eaR::cleanNames(sep = "_")
+
+# Fill column names
+fillColNames <- c("age", "workclass", "fnlwgt", "education", "education_num", "marital_status", "occupation", "relationship", "race", "sex", "capital_gain", "capital_loss", "hours_per_week", "native_country", "income")
+
+base::names(train) <- fillColNames
+base::names(test) <- fillColNames
+
+# Join train and test
+dat <- train %>%
+  dplyr::bind_rows(test)
+
+# Remove df's from memory
+rm(test, train)
+```
+
+# Structure and cleaning the data {.tabset .tabset-fade}
+
+We then need to clean up the data and to do this I inspect the data.
+
+```{r}
+# Names of columns - just for inspection
+base::names(dat)
+
+# Character columns
+cols <- c("workclass", "education", "marital_status", "occupation", "relationship", "race", "sex", "native_country", "income")
+
+# Loop through columns and get the unique contents and counts
+finRes <- c()
+finDf <- base::data.frame()
+for (vr in cols) {
+  tempresult <- dat %>% 
+    dplyr::group_by(!!as.name(vr)) %>%
+    dplyr::summarise(n = n()) %>%
+    dplyr::arrange(-n)
+  if(nrow(tempresult) > base::nrow(finDf)) {
+    for (ii in 1:(base::nrow(tempresult) - base::nrow(finDf)))  {
+      finDf <- finDf %>% dplyr::add_row()
+    }
+  } else {
+    for (ii in 1:(base::nrow(finDf) - base::nrow(tempresult)))  {
+      tempresult <- tempresult %>% dplyr::add_row()
+    }
+  }
+  
+  finDf[[vr]] <- tempresult[[vr]]
+  finDf[[paste0(vr, "_n")]] <- tempresult$n
+}
+
+# Use the above to clean columns
+dat <- dat %>% 
+  dplyr::mutate(workclass      = dplyr::if_else(workclass == "?", "other", workclass) %>% eaR::cleanNames(sep = "_"),
+                education      = education %>% eaR::cleanNames(sep = "_"),
+                marital_status = marital_status %>% eaR::cleanNames(sep = "_"),
+                occupation     = dplyr::if_else(occupation == "?", "other", occupation) %>% eaR::cleanNames(sep = "_"),
+                relationship   = relationship %>% eaR::cleanNames(sep = "_"),
+                race           = race %>% eaR::cleanNames(sep = "_"),
+                sex            = sex %>% eaR::cleanNames(sep = "_"),
+                native_country = native_country %>% eaR::cleanNames(sep = "_"),
+                native_country = dplyr::if_else(native_country %in% c("", "holand_netherlands"), "other", native_country),
+                income         = income %>% gsub(pattern = "\\.", replacement = ""))
+
+# Inspect the "distribution" of the categorical variables
+finDf
+```
+
+```{r}
+# Remove finDf from memory
+rm(finDf)
+```
+# Clustering {.tabset .tabset-fade}
+
+We will use K-means clustering to define our clusters.
+
+Essentially we want to minimise the Intra Cluster distance (Inertia) whilst maximising the Inter Cluster distance (Dunn Index).
+
+K means finds clusters such that the total intra-cluster variation (or total within-cluster sum of square (WSS)) is minimized. The total WSS measures the compactness of the clustering and we want it to be as small as possible.
+
+
+This gif shows you how K means works:
+```{r fig.show = "hold", out.width = "100%", fig.align = "centre", echo = FALSE}
+knitr::include_graphics("kmeansVisual.gif")
+```
+
+
+Find our K and do K means Clustering
+```{r}
+# Stratified sampling separate data into 20 for cluster, 80 train, 20 test
+set.seed(123)
+splitIndex <- caret::createDataPartition(dat[, native_country],
+                                         p     = 0.2,
+                                         list  = FALSE,
+                                         times = 1)
+clusterDF <- dat[splitIndex,  ]
+modDF     <- dat[-splitIndex, ]
+
+# Clustering Scaling/Standardising of variables/ Mean and Standard deviation to create info 
+clustPrep <- clusterDF %>% 
+  dplyr::group_by(native_country) %>% 
+  dplyr::summarise(meanAge     = age %>% mean(na.rm = TRUE),
+                   sdAge       = age %>% sd(na.rm = TRUE),
+                   meanEdu     = education_num %>% mean(na.rm = TRUE),
+                   sdEdu       = education_num %>% sd(na.rm = TRUE),
+                   meanWgt     = fnlwgt %>% mean(na.rm = TRUE),
+                   sdWgt       = fnlwgt %>% sd(na.rm = TRUE),
+                   meanhours   = hours_per_week %>% mean(na.rm = TRUE),
+                   sdhours     = hours_per_week %>% sd(na.rm = TRUE),
+                   meanCapGain = capital_gain %>% mean(na.rm = TRUE),
+                   sdCapGain   = capital_gain %>% sd(na.rm = TRUE),
+                   meanCapLoss = capital_loss %>% mean(na.rm = TRUE),
+                   sdCapLoss = capital_loss %>% sd(na.rm = TRUE),
+                   sexMale     = sum(sex == "male", na.rm = TRUE),
+                   sexAll      = n(),
+                   incomeLT50  = sum(income == "<=50K", na.rm = TRUE),
+                   incomeAll   = n()) %>% 
+  dplyr::mutate(incomePropLT50 = incomeLT50 / incomeAll,
+                sexMaleProp    = sexMale / sexAll) %>% 
+  dplyr::select(-c(incomeLT50, incomeAll, sexMale, sexAll)) %>% 
+  base::as.data.frame()
+
+# Keep a copy of countries to use later, we keep this to later join our clusters back on to it
+finClust <- clustPrep %>%
+  dplyr::select(native_country)
+
+# Drop categorical variable
+rownames(clustPrep) <- clustPrep$native_country
+clustPrep$native_country <- NULL
+
+# Plot kmeans using elbow method and within sum of squared to find optimal clusters
+# Elbow method looks at the total WSS as a function of the number of clusters: 
+# One should choose a number of clusters so that adding another cluster doesn’t improve much better the total WSS.
+set.seed(123)
+factoextra::fviz_nbclust(clustPrep, kmeans, method = "wss") +
+  geom_vline(xintercept = 3, linetype = 2)
+
+
+# Build clusters with selected k
+clusters <- stats::kmeans(clustPrep, centers = 8)
+
+# Look at the output of kmeans
+str(clusters)
+
+# Extract clusters and join back to finClust which holds country data
+finClust$cluster <- clusters$cluster
+
+# Join back original variables for analysis
+clustAnalysis <- clustPrep
+clustAnalysis$clusters <- clusters$cluster
+rownames(clustAnalysis) <- NULL
+# Summary analysis
+clustAnalysis %>% group_by(clusters) %>% summarise_all(.funs = mean)
+```
+
+# Modelling {.tabset .tabset-fade}
+
+```{r}
+# Join clusters onto Modeling Data
+modDF <- modDF %>% 
+  left_join(finClust, by = c("native_country" = "native_country")) %>% 
+  mutate(income = ifelse(income == ">50K", "high", "low") %>% as.factor())
+
+# Model building ----------------------------------------------------------
+
+# Key variables -----------------------------------------------------------
+target <- "income"
+featOrig  <- c("age", "workclass", "fnlwgt", "education", "education_num", "marital_status", 
+               "occupation", "relationship", "race", "sex", "capital_gain", "capital_loss",
+               "hours_per_week", "native_country")
+featClust <- c("age", "workclass", "fnlwgt", "education", "education_num", "marital_status", 
+               "occupation", "relationship", "race", "sex", "capital_gain", "capital_loss",
+               "hours_per_week", "cluster")
+
+# Split data into 80 train and 20 test 
+set.seed(123)
+splitIndex <- caret::createDataPartition(modDF[, income],
+                                         p     = 0.8,
+                                         list  = FALSE,
+                                         times = 1)
+train <- modDF[splitIndex,  ] %>% as.tibble()
+trainTarg <- train[[target]]
+train[[target]] <- NULL
+
+test  <- modDF[-splitIndex, ] %>% as.tibble()
+testTarg <- test[[target]]
+test[[target]] <- NULL
+
+
+# Prep the data for modelling ---------------------------------------------
+
+# Train -------------------------------------------------------------------
+trainOrig  <- train[, c(featOrig)]
+trainClust <- train[, c(featClust)]
+
+# Dummify variables for train set
+trainOrigDummy <- trainOrig %>% dummyVars(formula = "~.", fullRank = F)
+trainOrig      <- predict(trainOrigDummy, trainOrig) %>% as.data.frame()
+trainOrig[[target]] <- trainTarg
+
+trainClustDummy <- trainClust %>% dummyVars(formula = "~.", fullRank = F)
+trainClust      <- predict(trainClustDummy, trainClust) %>% as.data.frame()
+trainClust[[target]] <- trainTarg
+
+
+# Test --------------------------------------------------------------------
+testOrig  <- test[, c(featOrig)]
+testClust <- test[, c(featClust)]
+
+# Dummify variables for test set
+testOrigDummy                 <- testOrig %>% dummyVars(formula = "~.", fullRank = F)
+testOrig                      <- predict(testOrigDummy, testOrig) %>% as.data.frame()
+testOrig[[target]]            <- testTarg
+
+testClustDummy                  <- testClust %>% dummyVars(formula = "~.", fullRank = F)
+testClust                       <- predict(testClustDummy, testClust) %>% as.data.frame()
+testClust[[target]]             <- testTarg
+
+# Setting Parameters ------------------------------------------------------
+objControl <- trainControl(method = 'cv', 
+                           number = 2,
+                           summaryFunction = twoClassSummary, 
+                           classProbs = TRUE)
+set.seed(123)
+gbmGrid <- data.frame(interaction.depth = runif(1, 1 ,   5)    %>% round(0),
+                      n.trees           = runif(1, 50,   100) %>% round(0),
+                      n.minobsinnode    = runif(1, 1,    10)  %>% round(0),
+                      shrinkage         = runif(1, 0.01, 0.2)  %>% round(4)) %>%
+  distinct()
+
+
+# Build model using countries ---------------------------------------------
+# Training the train model
+formFeats  <- names(trainOrig)[names(trainOrig) != target]
+modFormula <- formula(paste0(target, " ~ ", paste0(formFeats, collapse = " + ")))
+set.seed(123)
+trainOrigObjModel <- caret::train(modFormula,
+                                  data         = trainOrig,
+                                  distribution = "bernoulli",
+                                  method       = "gbm",
+                                  metric       = "ROC",
+                                  trControl    = objControl,
+                                  tuneGrid     = gbmGrid)
+
+# Look at which  variables are important
+summary(trainOrigObjModel)
+
+# Which tuning parameters were most important
+print(trainOrigObjModel)
+
+# Adding missing dummy variables to test set ------------------------------
+# Original countries
+# Coefficient names used in the model
+coefNames <- data.frame(names = trainOrigObjModel$coefnames) %>% 
+  mutate(n = 1)
+
+testOrigNames <- data.frame(names = names(testOrig)) %>% 
+  mutate(n = 1)
+
+# Check difference in Model Coefficient names and test dataset
+nameDiff <- dplyr::anti_join(coefNames, testOrigNames)
+
+# Add variables that are missing from test
+for (nm in nameDiff$names) {
+  testOrig[[nm]] <- 0
+}
+
+
+# Build model using clusters ----------------------------------------------
+
+# Training the model with Clusters
+formFeats  <- names(trainClust)[names(trainClust) != target]
+modFormula <- formula(paste0(target, " ~ ", paste0(formFeats, collapse = " + ")))
+set.seed(123)
+trainClustObjModel <- caret::train(modFormula,
+                                   data         = trainClust,
+                                   distribution = "bernoulli",
+                                   method       = "gbm",
+                                   metric       = "ROC",
+                                   trControl    = objControl,
+                                   tuneGrid     = gbmGrid)
+
+# Look at which  variables are important
+summary(trainClustObjModel)
+
+# Adding missing dummy variables to test set ------------------------------
+# Clustered countries
+# Coefficient names used in the model
+coefNames <- data.frame(names = trainClustObjModel$coefnames) %>% 
+  mutate(n = 1)
+
+testClustNames <- data.frame(names = names(testClust)) %>% 
+  mutate(n = 1)
+
+# Check difference in Model Coefficient names and test dataset
+nameDiff <- dplyr::anti_join(coefNames, testClustNames)
+
+# Add variables that are missing from test
+for (nm in nameDiff$names) {
+  testClust[[nm]] <- 0
+}
+
+
+
+# Model evaluation --------------------------------------------------------
+# Original with Countries
+# Get predictions and probabilities on your test data
+origPredRaw <- predict(object = trainOrigObjModel, testOrig, type = 'raw')
+origPredProb <- predict(object = trainOrigObjModel, testOrig, type = 'prob')
+
+head(origPredRaw)
+head(origPredProb)
+
+# Overall Accuracy
+print(caret::postResample(pred = origPredRaw, obs = as.factor(testOrig[,"income"])))
+
+aucOrig <- pROC::roc(ifelse(testOrig[,"income"] == "high", 1, 0), origPredProb[[1]])
+
+print(aucOrig$auc)
+
+# Original with Countries
+# Get predictions and probabilities on your test data
+clustPredRaw <- predict(object = trainClustObjModel, testClust, type = 'raw')
+clustPredProb <- predict(object = trainClustObjModel, testClust, type = 'prob')
+
+head(clustPredRaw)
+head(clustPredProb)
+
+# Overall Accuracy
+print(caret::postResample(pred = clustPredRaw, obs = as.factor(testClust[,"income"])))
+
+aucClust <- pROC::roc(ifelse(testClust[,"income"] == "high", 1, 0), clustPredProb[[1]])
+
+print(aucClust$auc)
+```
+
+# Appendix {.tabset .tabset-fade}
+
+Euclidian distance
+```{r fig.show = "hold", out.width = "100%", fig.align = "centre", echo = FALSE}
+knitr::include_graphics("Euclidian distance.png")
+```
+
+As mentioned there are other types of clustering and ways to select your optimal K.
+```{r}
+# Hierarchical clustering with Silhouette method
+factoextra::fviz_nbclust(clustPrep, cluster::fanny, method = "silhouette") +
+  geom_vline(xintercept = 3, linetype = 2)
+
+# Hierarchical clustering with Gap statistic
+factoextra::fviz_nbclust(clustPrep, hcut, method = "gap_stat") +
+  geom_vline(xintercept = 3, linetype = 2)
+
+```
+
+[Link to Cluster Metrics](https://medium.com/@ODSC/unsupervised-learning-evaluating-clusters-bd47eed175ce#:~:text=Within%20Cluster%20Sum%20of%20Squares&text=To%20calculate%20WCSS%2C%20you%20first,by%20the%20number%20of%20points.)
+
+[Link to other types of Clustering Algorithms mentioned at the start](https://towardsdatascience.com/the-5-clustering-algorithms-data-scientists-need-to-know-a36d136ef68)

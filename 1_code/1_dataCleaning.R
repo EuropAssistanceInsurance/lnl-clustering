@@ -1,4 +1,4 @@
-# Names of columns
+# Names of columns - just for inspection
 base::names(dat)
 
 # Character columns
@@ -26,8 +26,8 @@ for (vr in cols) {
   finDf[[paste0(vr, "_n")]] <- tempresult$n
 }
 
-# Check out the head
-head(finDf)
+# Inspect the "distribution" of the categorical variables
+View(finDf)
 
 # Use the above to clean columns
 dat <- dat %>% 

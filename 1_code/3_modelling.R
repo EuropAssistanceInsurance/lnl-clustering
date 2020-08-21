@@ -1,5 +1,5 @@
 # Join clusters onto Modeling Data
-modDF2 <- modDF %>% 
+modDF <- modDF %>% 
   left_join(finClust, by = c("native_country" = "native_country")) %>% 
   mutate(income = ifelse(income == ">50K", "high", "low") %>% as.factor())
 
@@ -16,15 +16,15 @@ featClust <- c("age", "workclass", "fnlwgt", "education", "education_num", "mari
 
 # Split data into 80 train and 20 test 
 set.seed(123)
-splitIndex <- caret::createDataPartition(modDF2[, income],
+splitIndex <- caret::createDataPartition(modDF[, income],
                                          p     = 0.8,
                                          list  = FALSE,
                                          times = 1)
-train <- modDF2[splitIndex,  ] %>% as.tibble()
+train <- modDF[splitIndex,  ] %>% as.tibble()
 trainTarg <- train[[target]]
 train[[target]] <- NULL
 
-test  <- modDF2[-splitIndex, ] %>% as.tibble()
+test  <- modDF[-splitIndex, ] %>% as.tibble()
 testTarg <- test[[target]]
 test[[target]] <- NULL
 

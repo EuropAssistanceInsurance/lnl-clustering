@@ -31,7 +31,7 @@ clustPrep <- clusterDF %>%
   dplyr::select(-c(incomeLT50, incomeAll, sexMale, sexAll)) %>% 
   base::as.data.frame()
 
-# Keep a copy of countries to use later
+# Keep a copy of countries to use later, we keep this to later join our clusters back on to it
 finClust <- clustPrep %>%
   dplyr::select(native_country)
 
