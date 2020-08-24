@@ -64,10 +64,10 @@ objControl <- trainControl(method = 'cv',
                            summaryFunction = twoClassSummary, 
                            classProbs = TRUE)
 set.seed(123)
-gbmGrid <- data.frame(interaction.depth = runif(10, 0 ,   5)    %>% round(0),
-                      n.trees           = runif(10, 50,   1000) %>% round(0),
-                      n.minobsinnode    = runif(10, 1,    100)  %>% round(0),
-                      shrinkage         = runif(10, 0.01, 0.2)  %>% round(4)) %>%
+gbmGrid <- data.frame(interaction.depth = runif(100, 1 ,   5)    %>% round(0),
+                      n.trees           = runif(100, 50,   1000) %>% round(0),
+                      n.minobsinnode    = runif(100, 1,    100)  %>% round(0),
+                      shrinkage         = runif(100, 0.01, 0.2)  %>% round(4)) %>%
   distinct()
 
 
